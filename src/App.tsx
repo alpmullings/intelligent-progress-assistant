@@ -108,6 +108,7 @@ export default function App() {
       {state.phase === 'plan' && state.goal && (
         <PlanView
           goal={state.goal}
+          chat={state.chat}
           initialPlan={state.plan}
           onAccept={onAcceptPlan}
           onBack={() => setState(s => ({ ...s, phase: 'intake' }))}

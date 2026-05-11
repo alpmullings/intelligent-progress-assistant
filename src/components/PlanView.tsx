@@ -1,20 +1,23 @@
-import { useEffect, useState } from 'react';
-import type { Goal, Plan, PlanStep } from '../types';
+import { useEffect, useRef, useState } from 'react';
+import type { ChatTurn, Goal, Plan, PlanStep } from '../types';
 import { generatePlan } from '../llm';
 import { uid } from '../storage';
 
 type Props = {
   goal: Goal;
+  chat: ChatTurn[];
   initialPlan?: Plan;
   onAccept: (plan: Plan) => void;
   onBack: () => void;
   onDraftUpdate?: (steps: PlanStep[]) => void;
 };
 
-export function PlanView({ goal, initialPlan, onAccept, onBack, onDraftUpdate }: Props) {
+export function PlanView({ goal, chat, initialPlan, onAccept, onBack, onDraftUpdate }: Props) {
   const [steps, setSteps] = useState<PlanStep[]>(initialPlan?.steps ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const dragIndex = useRef<number | null>(null);
+  const dragOverIndex = useRef<number | null>(null);
 
   useEffect(() => {
     if (steps.length === 0) {
@@ -34,13 +37,39 @@ export function PlanView({ goal, initialPlan, onAccept, onBack, onDraftUpdate }:
     setBusy(true);
     setError(null);
     try {
-      const fresh = await generatePlan(goal);
+      const fresh = await generatePlan(goal, chat);
       setSteps(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Plan generation failed.');
     } finally {
       setBusy(false);
     }
+  }
+
+  function moveStep(from: number, to: number) {
+    if (from === to) return;
+    setSteps(prev => {
+      const next = [...prev];
+      const [item] = next.splice(from, 1);
+      next.splice(to, 0, item);
+      return next;
+    });
+  }
+
+  function onDragStart(i: number) {
+    dragIndex.current = i;
+  }
+
+  function onDragEnter(i: number) {
+    dragOverIndex.current = i;
+  }
+
+  function onDragEnd() {
+    if (dragIndex.current !== null && dragOverIndex.current !== null) {
+      moveStep(dragIndex.current, dragOverIndex.current);
+    }
+    dragIndex.current = null;
+    dragOverIndex.current = null;
   }
 
   function updateStep(id: string, patch: Partial<PlanStep>) {
@@ -108,7 +137,16 @@ export function PlanView({ goal, initialPlan, onAccept, onBack, onDraftUpdate }:
       {error && <div className="error">{error}</div>}
 
       {steps.map((s, i) => (
-        <div key={s.id} className={`step ${s.status}`}>
+        <div
+          key={s.id}
+          className={`step ${s.status}`}
+          draggable
+          onDragStart={() => onDragStart(i)}
+          onDragEnter={() => onDragEnter(i)}
+          onDragEnd={onDragEnd}
+          onDragOver={e => e.preventDefault()}
+          style={{ cursor: 'grab' }}
+        >
           <div className="marker">{i + 1}</div>
           <div>
             <input
@@ -139,6 +177,7 @@ export function PlanView({ goal, initialPlan, onAccept, onBack, onDraftUpdate }:
             </div>
           </div>
           <div className="actions">
+            <span title="Drag to reorder" style={{ cursor: 'grab', color: 'var(--muted)', fontSize: 18, padding: '0 4px', userSelect: 'none' }}>⠿</span>
             <button className="danger" onClick={() => removeStep(s.id)}>Remove</button>
           </div>
         </div>

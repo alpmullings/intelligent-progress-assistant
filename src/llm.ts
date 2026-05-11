@@ -145,27 +145,11 @@ export async function deleteIntakeDoc(docId: string): Promise<void> {
   }
 }
 
-export async function generatePlan(goal: Goal): Promise<PlanStep[]> {
+export async function generatePlan(goal: Goal, history: ChatTurn[]): Promise<PlanStep[]> {
   const today = new Date().toISOString().slice(0, 10);
-
-  // Retrieve relevant chunks from the intake chat transcript via RAG.
-  let contextSection = '';
-  if (goal.intakeDocId) {
-    try {
-      const filters = ViaRAGClient.filters().eq({ goalId: goal.id });
-      const matches = await client().search(
-        `Detailed breakdown of tasks, quantities, schedule, and priorities for: ${goal.smartStatement}`,
-        { topK: 8, filters },
-      );
-      if (matches.length > 0) {
-        contextSection =
-          '\n\nRelevant excerpts from the user\'s intake conversation (use these verbatim details when building the plan):\n' +
-          (matches as unknown as Array<{ content: string }>).map(m => m.content).join('\n---\n');
-      }
-    } catch {
-      // fall back to no retrieval
-    }
-  }
+  const transcript = history
+    .map(t => `${t.role === 'user' ? 'USER' : 'COACH'}: ${t.content}`)
+    .join('\n');
 
   const prompt = `You are a planning coach. Given this SMART goal, produce a concrete action plan.
 Today is ${today}. The plan must have 4-8 steps, ordered, each with a target date relative to today.
@@ -177,15 +161,19 @@ Rules:
 - Steps must be specific actions the user can do (verbs first).
 - daysFromNow must be a positive integer; the final step should be near the goal's deadline.
 - Keep titles under 60 chars; descriptions under 180 chars.
-- Honour any specific quantities, schedules, or priorities the user stated exactly — do not round or approximate.
-- Use ALL SMART dimensions below to make each step specific and measurable.
+- The full intake conversation is provided below. Read it carefully and honour EVERY specific quantity, schedule, level breakdown, or daily target the user stated — do not paraphrase, round, or re-derive a structure.
+- Use ALL SMART dimensions to make each step specific and measurable.
 
 SMART goal: ${goal.smartStatement}
 Specific: ${goal.smart.specific}
 Measurable: ${goal.smart.measurable}
 Achievable: ${goal.smart.achievable}
 Relevant: ${goal.smart.relevant}
-Time-bound: ${goal.smart.timeBound}${contextSection}`;
+Time-bound: ${goal.smart.timeBound}
+
+Full intake conversation:
+${transcript}`;
+
   const raw = await direct(prompt);
   const arr = extractJsonArray<RawPlanStep>(raw);
   if (arr.length === 0) throw new Error('Plan generation returned no steps');
