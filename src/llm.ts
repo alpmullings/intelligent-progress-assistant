@@ -56,6 +56,27 @@ function extractJson<T>(raw: string): T {
   return JSON.parse(body.slice(start, end + 1)) as T;
 }
 
+function localDatetimeFromDays(daysFromNow: number): string {
+  const d = new Date(Date.now() + Math.max(1, Math.round(daysFromNow)) * 86400000);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}T09:00`;
+}
+
+// Finds and parses the outermost JSON array from raw LLM output, tolerating surrounding prose.
+function extractJsonArray<T>(raw: string): T[] {
+  const fenced = raw.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  const body = fenced ? fenced[1] : raw;
+  const start = body.indexOf('[');
+  if (start < 0) throw new Error('No JSON array found in model output');
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < body.length; i++) {
+    if (body[i] === '[') depth++;
+    else if (body[i] === ']') { depth--; if (depth === 0) { end = i; break; } }
+  }
+  if (end < 0) throw new Error('Malformed JSON array in model output');
+  return JSON.parse(body.slice(start, end + 1)) as T[];
+}
+
 const COACH_SYSTEM = `You are a friendly SMART-goal coach. The user wants to set one goal.
 Walk them through making it SMART (Specific, Measurable, Achievable, Relevant, Time-bound).
 Ask ONE crisp question at a time. Keep replies under 60 words. Reference what they've
@@ -104,8 +125,48 @@ export type RawPlanStep = {
   daysFromNow: number;
 };
 
-export async function generatePlan(smartStatement: string): Promise<PlanStep[]> {
+export async function embedIntakeChat(history: ChatTurn[], goalId: string): Promise<string> {
+  const c = client();
+  const transcript = history
+    .map(t => `${t.role === 'user' ? 'USER' : 'COACH'}: ${t.content}`)
+    .join('\n');
+  const result = await c.embed(transcript, {
+    metadata: { goalId, type: 'intake-chat' },
+    chunking: { chunkSize: 500, chunkOverlap: 50 },
+  });
+  return (result as unknown as { doc_id: string }).doc_id;
+}
+
+export async function deleteIntakeDoc(docId: string): Promise<void> {
+  try {
+    await client().delete(docId);
+  } catch {
+    // best-effort cleanup
+  }
+}
+
+export async function generatePlan(goal: Goal): Promise<PlanStep[]> {
   const today = new Date().toISOString().slice(0, 10);
+
+  // Retrieve relevant chunks from the intake chat transcript via RAG.
+  let contextSection = '';
+  if (goal.intakeDocId) {
+    try {
+      const filters = ViaRAGClient.filters().eq({ goalId: goal.id });
+      const matches = await client().search(
+        `Detailed breakdown of tasks, quantities, schedule, and priorities for: ${goal.smartStatement}`,
+        { topK: 8, filters },
+      );
+      if (matches.length > 0) {
+        contextSection =
+          '\n\nRelevant excerpts from the user\'s intake conversation (use these verbatim details when building the plan):\n' +
+          (matches as unknown as Array<{ content: string }>).map(m => m.content).join('\n---\n');
+      }
+    } catch {
+      // fall back to no retrieval
+    }
+  }
+
   const prompt = `You are a planning coach. Given this SMART goal, produce a concrete action plan.
 Today is ${today}. The plan must have 4-8 steps, ordered, each with a target date relative to today.
 Return ONLY a JSON array (no prose, no code fences) of objects with this shape:
@@ -116,20 +177,23 @@ Rules:
 - Steps must be specific actions the user can do (verbs first).
 - daysFromNow must be a positive integer; the final step should be near the goal's deadline.
 - Keep titles under 60 chars; descriptions under 180 chars.
+- Honour any specific quantities, schedules, or priorities the user stated exactly — do not round or approximate.
+- Use ALL SMART dimensions below to make each step specific and measurable.
 
-SMART goal:
-${smartStatement}`;
+SMART goal: ${goal.smartStatement}
+Specific: ${goal.smart.specific}
+Measurable: ${goal.smart.measurable}
+Achievable: ${goal.smart.achievable}
+Relevant: ${goal.smart.relevant}
+Time-bound: ${goal.smart.timeBound}${contextSection}`;
   const raw = await direct(prompt);
-  const arr = extractJson<RawPlanStep[]>(raw);
-  if (!Array.isArray(arr) || arr.length === 0) throw new Error('Plan generation returned no steps');
-  const now = Date.now();
+  const arr = extractJsonArray<RawPlanStep>(raw);
+  if (arr.length === 0) throw new Error('Plan generation returned no steps');
   return arr.slice(0, 12).map((s, i) => ({
     id: uid('step_'),
     title: String(s.title || `Step ${i + 1}`).slice(0, 80),
     description: String(s.description || '').slice(0, 240),
-    targetDate: new Date(now + Math.max(1, Math.round(s.daysFromNow || (i + 1) * 3)) * 86400000)
-      .toISOString()
-      .slice(0, 10),
+    targetDate: localDatetimeFromDays(s.daysFromNow || (i + 1) * 3),
     status: 'pending' as const,
   }));
 }
@@ -155,15 +219,12 @@ Rules:
 - 3-7 steps. Adjust scope or dates to make the plan realistic again.
 - daysFromNow is relative to today.`;
   const raw = await direct(prompt);
-  const arr = extractJson<RawPlanStep[]>(raw);
-  const now = Date.now();
+  const arr = extractJsonArray<RawPlanStep>(raw);
   return arr.slice(0, 10).map((s, i) => ({
     id: uid('step_'),
     title: String(s.title || `Step ${i + 1}`).slice(0, 80),
     description: String(s.description || '').slice(0, 240),
-    targetDate: new Date(now + Math.max(1, Math.round(s.daysFromNow || (i + 1) * 3)) * 86400000)
-      .toISOString()
-      .slice(0, 10),
+    targetDate: localDatetimeFromDays(s.daysFromNow || (i + 1) * 3),
     status: 'pending' as const,
   }));
 }

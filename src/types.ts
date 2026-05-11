@@ -12,6 +12,7 @@ export type Goal = {
   smart: SmartFields;
   smartStatement: string;
   createdAt: string;
+  intakeDocId?: string;
 };
 
 export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';

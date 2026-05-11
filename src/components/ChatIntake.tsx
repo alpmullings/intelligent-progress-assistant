@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChatTurn, Goal, SmartFields } from '../types';
-import { coachNextTurn, extractSmart, hasApiKey } from '../llm';
+import { coachNextTurn, embedIntakeChat, extractSmart, hasApiKey } from '../llm';
 import { uid } from '../storage';
 
 const OPENER = "Hi! I'm here to help you turn a goal into a SMART plan. In one or two sentences, what's the goal you want to make progress on?";
@@ -56,12 +56,20 @@ export function ChatIntake({ chat, setChat, onGoalReady }: Props) {
     try {
       const { smart, smartStatement } = await extractSmart(chat);
       const rawWish = chat.find(t => t.role === 'user')?.content ?? '';
+      const goalId = uid('goal_');
+      let intakeDocId: string | undefined;
+      try {
+        intakeDocId = await embedIntakeChat(chat, goalId);
+      } catch {
+        // non-fatal — plan generation falls back to direct query
+      }
       const goal: Goal = {
-        id: uid('goal_'),
+        id: goalId,
         rawWish,
         smart: smart as SmartFields,
         smartStatement,
         createdAt: new Date().toISOString(),
+        intakeDocId,
       };
       onGoalReady(goal);
     } catch (e) {

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import './styles.css';
-import type { AppState, ChatTurn, Goal, Plan, Settings } from './types';
-import { loadState, resetState, saveState } from './storage';
+import type { AppState, ChatTurn, Goal, Plan, PlanStep, Settings } from './types';
+import { loadState, resetState, saveState, uid } from './storage';
 import { ChatIntake } from './components/ChatIntake';
 import { PlanView } from './components/PlanView';
 import { Dashboard } from './components/Dashboard';
@@ -21,7 +21,7 @@ export default function App() {
   }, []);
 
   const onGoalReady = useCallback((goal: Goal) => {
-    setState(s => ({ ...s, goal, phase: 'plan' }));
+    setState(s => ({ ...s, goal, plan: undefined, phase: 'plan' }));
   }, []);
 
   const onAcceptPlan = useCallback((plan: Plan) => {
@@ -40,12 +40,26 @@ export default function App() {
     setState(s => ({ ...s, nextCheckInAt: iso }));
   }, []);
 
+  const onDraftPlanUpdate = useCallback((steps: PlanStep[]) => {
+    setState(s => ({
+      ...s,
+      plan: {
+        id: s.plan?.id ?? uid('plan_'),
+        goalId: s.goal!.id,
+        steps,
+      },
+    }));
+  }, []);
+
   const fireProactiveCheckIn = useCallback(() => {
     setPendingProactiveAt(Date.now());
   }, []);
 
   const reset = useCallback(() => {
     if (!confirm('Reset everything — goal, plan, chat, settings?')) return;
+    if (state.goal?.intakeDocId) {
+      void import('./llm').then(({ deleteIntakeDoc }) => deleteIntakeDoc(state.goal!.intakeDocId!));
+    }
     setState(resetState());
   }, []);
 
@@ -61,7 +75,7 @@ export default function App() {
   const canVisit = (k: typeof phaseTabs[number]['key']) => {
     if (k === 'intake') return true;
     if (k === 'plan') return Boolean(state.goal);
-    return Boolean(state.goal && state.plan);
+    return Boolean(state.goal && state.plan?.acceptedAt);
   };
 
   return (
@@ -97,6 +111,7 @@ export default function App() {
           initialPlan={state.plan}
           onAccept={onAcceptPlan}
           onBack={() => setState(s => ({ ...s, phase: 'intake' }))}
+          onDraftUpdate={onDraftPlanUpdate}
         />
       )}
 

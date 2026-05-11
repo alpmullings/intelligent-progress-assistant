@@ -21,7 +21,16 @@ function statusLabel(s: StepStatus): string {
 }
 
 function fmt(date: string): string {
-  return new Date(date).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+  if (date.length > 10) {
+    const d = new Date(date);
+    return (
+      d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) +
+      ' · ' +
+      d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+    );
+  }
+  const parts = date.split('-').map(Number);
+  return new Date(parts[0], parts[1] - 1, parts[2]).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
 function avgMinutesText(ratePerHour: number): string {

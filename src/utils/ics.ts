@@ -4,9 +4,9 @@ function pad(n: number): string {
   return n.toString().padStart(2, '0');
 }
 
-function toIcsDate(yyyyMmDd: string): string {
-  // All-day events use VALUE=DATE with YYYYMMDD.
-  return yyyyMmDd.replace(/-/g, '');
+function toIcsDate(date: string): string {
+  // All-day events use VALUE=DATE with YYYYMMDD. Slice to date-only first.
+  return date.slice(0, 10).replace(/-/g, '');
 }
 
 function escapeIcs(text: string): string {

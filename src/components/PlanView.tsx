@@ -8,9 +8,10 @@ type Props = {
   initialPlan?: Plan;
   onAccept: (plan: Plan) => void;
   onBack: () => void;
+  onDraftUpdate?: (steps: PlanStep[]) => void;
 };
 
-export function PlanView({ goal, initialPlan, onAccept, onBack }: Props) {
+export function PlanView({ goal, initialPlan, onAccept, onBack, onDraftUpdate }: Props) {
   const [steps, setSteps] = useState<PlanStep[]>(initialPlan?.steps ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,11 +23,18 @@ export function PlanView({ goal, initialPlan, onAccept, onBack }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  useEffect(() => {
+    if (steps.length > 0 && onDraftUpdate) {
+      onDraftUpdate(steps);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [steps]);
+
   async function generate() {
     setBusy(true);
     setError(null);
     try {
-      const fresh = await generatePlan(goal.smartStatement);
+      const fresh = await generatePlan(goal);
       setSteps(fresh);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Plan generation failed.');
@@ -44,15 +52,17 @@ export function PlanView({ goal, initialPlan, onAccept, onBack }: Props) {
   }
 
   function addStep() {
-    const last = steps[steps.length - 1]?.targetDate ?? new Date().toISOString().slice(0, 10);
-    const next = new Date(new Date(last).getTime() + 7 * 86400000).toISOString().slice(0, 10);
+    const last = steps[steps.length - 1]?.targetDate;
+    const base = last ? new Date(last) : new Date();
+    const next = new Date(base.getTime() + 7 * 86400000);
+    const nextStr = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, '0')}-${String(next.getDate()).padStart(2, '0')}T09:00`;
     setSteps(prev => [
       ...prev,
       {
         id: uid('step_'),
         title: 'New step',
         description: '',
-        targetDate: next,
+        targetDate: nextStr,
         status: 'pending',
       },
     ]);
@@ -121,8 +131,8 @@ export function PlanView({ goal, initialPlan, onAccept, onBack }: Props) {
             <div className="meta">
               <label>Due:&nbsp;
                 <input
-                  type="date"
-                  value={s.targetDate}
+                  type="datetime-local"
+                  value={s.targetDate.length === 10 ? s.targetDate + 'T09:00' : s.targetDate}
                   onChange={e => updateStep(s.id, { targetDate: e.target.value })}
                 />
               </label>
