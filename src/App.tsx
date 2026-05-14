@@ -47,6 +47,7 @@ export default function App() {
         id: s.plan?.id ?? uid('plan_'),
         goalId: s.goal!.id,
         steps,
+        acceptedAt: s.plan?.acceptedAt, // preserve so Dashboard tab stays accessible
       },
     }));
   }, []);

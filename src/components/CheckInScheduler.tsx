@@ -85,20 +85,39 @@ export async function ensureNotificationPermission(): Promise<NotificationPermis
   }
 }
 
-export function fireChatNotification(body: string): void {
+export async function fireChatNotification(body: string): Promise<void> {
   if (typeof Notification === 'undefined') return;
   if (Notification.permission !== 'granted') return;
   if (!document.hidden) return;
   try {
-    const n = new Notification('Coach', {
-      body: body.slice(0, 140),
-      icon: '/favicon.svg',
-      tag: 'ipa-chat',
-    });
-    n.onclick = () => {
-      window.focus();
-      n.close();
-    };
+    // Use ServiceWorkerRegistration.showNotification() so iOS PWA can receive notifications.
+    // Falls back to direct Notification constructor on browsers without an active SW.
+    // navigator.serviceWorker.ready never rejects — race with a timeout so we
+    // fall back gracefully when no SW is active (e.g. local dev server).
+    const reg =
+      'serviceWorker' in navigator
+        ? await Promise.race<ServiceWorkerRegistration | null>([
+            navigator.serviceWorker.ready,
+            new Promise<null>(res => setTimeout(() => res(null), 2000)),
+          ]).catch(() => null)
+        : null;
+    if (reg?.showNotification) {
+      await reg.showNotification('Coach', {
+        body: body.slice(0, 140),
+        icon: '/favicon.svg',
+        tag: 'ipa-chat',
+      });
+    } else {
+      const n = new Notification('Coach', {
+        body: body.slice(0, 140),
+        icon: '/favicon.svg',
+        tag: 'ipa-chat',
+      });
+      n.onclick = () => {
+        window.focus();
+        n.close();
+      };
+    }
   } catch {
     /* ignore */
   }

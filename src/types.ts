@@ -15,7 +15,7 @@ export type Goal = {
   intakeDocId?: string;
 };
 
-export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked';
+export type StepStatus = 'pending' | 'in_progress' | 'done' | 'blocked' | 'overdue';
 
 export type PlanStep = {
   id: string;

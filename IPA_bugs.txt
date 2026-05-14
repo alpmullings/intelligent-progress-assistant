@@ -1,0 +1,7 @@
+1. How does the Goal chat to Plan creation pipeline work? It seems that the AI is not factoring in everything I said in the initial chat in a systematic fashion. 
+
+2. If I haven't accepted the plan, but click back to the Goal tab to access the goal chat, when I click the Plan tab again, it recreates the plan from scratch. this should be stored and not regenerated each time I click off and back on to the Plan tab.
+
+3. I am seeing only dates and not times in steps within the Plan tab
+
+4. When we accept the plan, I see that the dates for all the steps are pushed back by one day. So if 2026/05/12 was selected in the Plan tab, in the Track Tab we see 'Due May 11, 2026'.

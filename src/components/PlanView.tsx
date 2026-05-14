@@ -16,8 +16,12 @@ export function PlanView({ goal, chat, initialPlan, onAccept, onBack, onDraftUpd
   const [steps, setSteps] = useState<PlanStep[]>(initialPlan?.steps ?? []);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [touchDragSrc, setTouchDragSrc] = useState<number | null>(null);
+  const [touchDragTarget, setTouchDragTarget] = useState<number | null>(null);
   const dragIndex = useRef<number | null>(null);
   const dragOverIndex = useRef<number | null>(null);
+  const longPressTimer = useRef<number | null>(null);
+  const touchActiveRef = useRef(false);
 
   useEffect(() => {
     if (steps.length === 0) {
@@ -70,6 +74,51 @@ export function PlanView({ goal, chat, initialPlan, onAccept, onBack, onDraftUpd
     }
     dragIndex.current = null;
     dragOverIndex.current = null;
+  }
+
+  function onTouchStart(i: number) {
+    longPressTimer.current = window.setTimeout(() => {
+      touchActiveRef.current = true;
+      dragIndex.current = i;
+      setTouchDragSrc(i);
+      if (navigator.vibrate) navigator.vibrate(40);
+    }, 500);
+  }
+
+  function onTouchMove(e: React.TouchEvent) {
+    if (longPressTimer.current !== null) {
+      // Finger moved before long-press fired — cancel and let normal scroll happen.
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+      if (!touchActiveRef.current) return;
+    }
+    if (!touchActiveRef.current) return;
+    e.preventDefault(); // block page scroll while dragging
+    const touch = e.touches[0];
+    let targetIdx: number | null = null;
+    document.querySelectorAll<HTMLElement>('[data-step-index]').forEach(el => {
+      const rect = el.getBoundingClientRect();
+      if (touch.clientY >= rect.top && touch.clientY <= rect.bottom) {
+        targetIdx = parseInt(el.dataset.stepIndex!, 10);
+      }
+    });
+    dragOverIndex.current = targetIdx;
+    setTouchDragTarget(targetIdx);
+  }
+
+  function onTouchEnd() {
+    if (longPressTimer.current !== null) {
+      window.clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (touchActiveRef.current && dragIndex.current !== null && dragOverIndex.current !== null) {
+      moveStep(dragIndex.current, dragOverIndex.current);
+    }
+    touchActiveRef.current = false;
+    dragIndex.current = null;
+    dragOverIndex.current = null;
+    setTouchDragSrc(null);
+    setTouchDragTarget(null);
   }
 
   function updateStep(id: string, patch: Partial<PlanStep>) {
@@ -140,12 +189,22 @@ export function PlanView({ goal, chat, initialPlan, onAccept, onBack, onDraftUpd
         <div
           key={s.id}
           className={`step ${s.status}`}
+          data-step-index={i}
           draggable
           onDragStart={() => onDragStart(i)}
           onDragEnter={() => onDragEnter(i)}
           onDragEnd={onDragEnd}
           onDragOver={e => e.preventDefault()}
-          style={{ cursor: 'grab' }}
+          onTouchStart={() => onTouchStart(i)}
+          onTouchMove={onTouchMove}
+          onTouchEnd={onTouchEnd}
+          onTouchCancel={onTouchEnd}
+          style={{
+            cursor: 'grab',
+            opacity: touchDragSrc === i ? 0.45 : 1,
+            outline: touchDragTarget === i && touchDragTarget !== touchDragSrc ? '2px solid var(--accent)' : undefined,
+            transition: 'opacity 0.15s',
+          }}
         >
           <div className="marker">{i + 1}</div>
           <div>

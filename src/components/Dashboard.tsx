@@ -17,7 +17,7 @@ type Props = {
 };
 
 function statusLabel(s: StepStatus): string {
-  return s === 'in_progress' ? 'In progress' : s === 'blocked' ? 'Blocked' : s === 'done' ? 'Done' : 'Pending';
+  return s === 'in_progress' ? 'In progress' : s === 'blocked' ? 'Blocked' : s === 'done' ? 'Done' : s === 'overdue' ? 'Overdue' : 'Pending';
 }
 
 function fmt(date: string): string {
@@ -61,6 +61,14 @@ export function Dashboard({
   );
   const scrollRef = useRef<HTMLDivElement>(null);
   const lastProactiveRef = useRef<number>(0);
+  // Keep stable refs to plan and chat so async callbacks always read latest values.
+  const planRef = useRef(plan);
+  useEffect(() => { planRef.current = plan; }, [plan]);
+  const chatRef = useRef(chat);
+  useEffect(() => { chatRef.current = chat; }, [chat]);
+  // Track which step IDs have already had their imminent-deadline alarm fire.
+  const imminentTimers = useRef<Map<string, number>>(new Map());
+  const imminentFired = useRef<Set<string>>(new Set());
 
   function setStatus(stepId: string, status: StepStatus) {
     onUpdatePlan({
@@ -68,6 +76,57 @@ export function Dashboard({
       steps: plan.steps.map(s => (s.id === stepId ? { ...s, status } : s)),
     });
   }
+
+  // Auto-mark steps as overdue when their deadline passes.
+  useEffect(() => {
+    function checkOverdue() {
+      const now = new Date();
+      const toMark = planRef.current.steps.filter(
+        s => s.status !== 'done' && s.status !== 'overdue' && new Date(s.targetDate) < now,
+      );
+      if (toMark.length > 0) {
+        const ids = new Set(toMark.map(s => s.id));
+        onUpdatePlan({
+          ...planRef.current,
+          steps: planRef.current.steps.map(s => ids.has(s.id) ? { ...s, status: 'overdue' as StepStatus } : s),
+        });
+      }
+    }
+    checkOverdue();
+    const interval = window.setInterval(checkOverdue, 60_000);
+    return () => window.clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Arm a 5-minute-before-deadline proactive check-in for each upcoming non-done step.
+  useEffect(() => {
+    imminentTimers.current.forEach(t => window.clearTimeout(t));
+    imminentTimers.current.clear();
+    const FIVE_MIN = 5 * 60 * 1000;
+    const now = Date.now();
+    plan.steps.forEach(step => {
+      if (step.status === 'done' || step.status === 'overdue') return;
+      if (imminentFired.current.has(step.id)) return;
+      const deadline = new Date(step.targetDate).getTime();
+      const delay = deadline - FIVE_MIN - now;
+      if (delay <= 0) return;
+      imminentTimers.current.set(
+        step.id,
+        window.setTimeout(() => {
+          imminentFired.current.add(step.id);
+          const current = planRef.current.steps.find(s => s.id === step.id);
+          if (current && current.status !== 'done' && current.status !== 'overdue') {
+            void generateCoachTurn(true, chatRef.current, step.title);
+          }
+        }, delay),
+      );
+    });
+    return () => {
+      imminentTimers.current.forEach(t => window.clearTimeout(t));
+      imminentTimers.current.clear();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [plan.steps]);
 
   function exportIcs() {
     const ics = planToIcs(plan, goal);
@@ -106,20 +165,21 @@ export function Dashboard({
     }
   }
 
-  async function generateCoachTurn(proactive: boolean, baseHistory: ChatTurn[]) {
+  async function generateCoachTurn(proactive: boolean, baseHistory: ChatTurn[], imminentStepTitle?: string) {
     setError(null);
     setBusy(true);
     try {
       const { reply, suggestsRevision } = await coachReplyOnTrack({
         history: baseHistory,
         goal,
-        plan,
+        plan: planRef.current,
         proactive,
+        imminentStepTitle,
       });
       const next: ChatTurn[] = [...baseHistory, { role: 'assistant', content: reply }];
       onAppendChat(next);
       if (suggestsRevision) setShowRevise(true);
-      fireChatNotification(reply);
+      void fireChatNotification(reply);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Coach call failed.');
     } finally {
@@ -184,7 +244,7 @@ export function Dashboard({
         <div className="card" style={{ marginBottom: 12 }}>
           <strong>{goal.smartStatement}</strong>
           <div className="muted" style={{ marginTop: 6 }}>
-            Progress: {done}/{total} done · {totals.blocked || 0} blocked · {totals.in_progress || 0} in progress
+            Progress: {done}/{total} done · {totals.overdue || 0} overdue · {totals.blocked || 0} blocked · {totals.in_progress || 0} in progress
           </div>
         </div>
 
@@ -217,6 +277,7 @@ export function Dashboard({
                 <option value="in_progress">In progress</option>
                 <option value="done">Done</option>
                 <option value="blocked">Blocked</option>
+                <option value="overdue">Overdue</option>
               </select>
             </div>
           </div>

@@ -97,6 +97,8 @@ button.danger { background: transparent; border: 1px solid var(--bad); color: va
 .step.done .marker { background: var(--good); border-color: var(--good); color: #0b1020; }
 .step.blocked .marker { background: var(--bad); border-color: var(--bad); color: #0b1020; }
 .step.in_progress .marker { background: var(--warn); border-color: var(--warn); color: #0b1020; }
+.step.overdue { border-color: #f97316; }
+.step.overdue .marker { background: #f97316; border-color: #f97316; color: #0b1020; }
 .step h4 { margin: 0 0 4px; font-size: 15px; }
 .step p { margin: 0; color: var(--muted); font-size: 13px; }
 .step .meta { color: var(--muted); font-size: 12px; margin-top: 6px; display: flex; gap: 10px; align-items: center; }
